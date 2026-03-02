@@ -191,7 +191,7 @@ def _build_payload(model: str, prompt: str, rows: int, cols: int, use_schema: bo
     )
     payload: dict[str, Any] = {
         "model": model,
-        "temperature": 0.2,
+        "temperature": 0.7,
         "messages": [
             {"role": "system", "content": system_message},
             {"role": "user", "content": prompt},
