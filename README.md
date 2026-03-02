@@ -15,19 +15,31 @@ Because the board is finite and deterministic, every run eventually repeats. The
 
 ## Install
 
-Install from a local checkout:
+Install from PyPI:
 
 ```bash
-python -m pip install .
+python -m pip install game-of-life-bench
 ```
 
-For development:
+Package page:
+
+```text
+https://pypi.org/project/game-of-life-bench/
+```
+
+To use the local web UI:
+
+```bash
+python -m pip install "game-of-life-bench[web]"
+```
+
+For development from a local checkout:
 
 ```bash
 python -m pip install -e .
 ```
 
-To use the local web UI:
+For development with the web extras:
 
 ```bash
 python -m pip install -e ".[web]"
