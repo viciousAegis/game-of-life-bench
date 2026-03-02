@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cell Auto Benchmark</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="benchmark-layout">
+      <aside class="sidebar panel">
+        <div class="brand">
+          <p class="eyebrow">leaderboard</p>
+          <h1>game-of-life bench</h1>
+          <p class="lede">a leaderboard for models trying to design long-lived starting boards in Conway's Game of Life</p>
+        </div>
+
+        <div class="stack compact-text">
+          <div class="section-label">about the benchmark</div>
+          <p>Each model is asked to propose an initial board on an {{ rows }}x{{ cols }} toroidal grid.</p>
+          <p>The rule system is Conway's Game of Life.</p>
+          <p>We run each model across {{ trials_per_model }} trial seeds and keep its best submission.</p>
+          <p>The main score is the number of steps before the first repeated global state, capped at {{ max_steps }} steps.</p>
+        </div>
+
+        <div class="stack compact-text">
+          <div class="section-label">made by</div>
+          <p>Akshit Sinha</p>
+          <p><a class="sidebar-link" href="https://github.com/" target="_blank" rel="noreferrer">GitHub leaderboard repo</a></p>
+        </div>
+      </aside>
+
+      <section class="benchmark-main">
+        <div class="terminal panel">
+          <div class="terminal-bar">
+            <span>bench://leaderboard</span>
+            <span>{{ leaderboard | length }} ranked models</span>
+          </div>
+          <div id="leaderboard-table" class="leaderboard-table" data-static="true">
+            {% if leaderboard %}
+            <table>
+              <thead>
+                <tr>
+                  <th>rank</th>
+                  <th data-sort-key="provider">provider</th>
+                  <th data-sort-key="model_name">model</th>
+                  <th data-sort-key="submission_score">max</th>
+                  <th data-sort-key="best_average_score">avg</th>
+                  <th data-sort-key="avg_output_tokens">avg tokens</th>
+                  <th data-sort-key="total_cost">cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in leaderboard %}
+                <tr
+                  data-model="{{ entry.model }}"
+                  data-provider="{{ entry.model.split('/', 1)[0] if '/' in entry.model else 'unknown' }}"
+                  data-model-name="{{ entry.model.split('/', 1)[1] if '/' in entry.model else entry.model }}"
+                  data-rank="{{ entry.rank }}"
+                  data-best-board='{{ entry.best_board | tojson }}'
+                  data-submission-score="{{ entry.submission_score }}"
+                  data-best-average-score="{{ entry.best_average_score }}"
+                  data-avg-output-tokens="{{ entry.get('avg_output_tokens', '') if entry.get('avg_output_tokens') is not none else '' }}"
+                  data-best-run-id="{{ entry.best_run_id }}"
+                  data-best-benchmark-id="{{ entry.best_benchmark_id }}"
+                  data-total-cost="{{ entry.get('total_cost', '') if entry.get('total_cost') is not none else '' }}"
+                >
+                  <td>{{ entry.rank }}</td>
+                  <td>{{ entry.model.split('/', 1)[0] if '/' in entry.model else 'unknown' }}</td>
+                  <td>{{ entry.model.split('/', 1)[1] if '/' in entry.model else entry.model }}</td>
+                  <td>{{ entry.submission_score }}</td>
+                  <td>{{ "%.2f"|format(entry.best_average_score) }}</td>
+                  <td>{% if entry.get('avg_output_tokens') is not none %}{{ "%.1f"|format(entry.get('avg_output_tokens')) }}{% else %}-{% endif %}</td>
+                  <td>{% if entry.get('total_cost') is not none %}${{ "%.4f"|format(entry.get('total_cost')) }}{% else %}-{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">No benchmark results published yet.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="benchmark-side">
+          <div class="terminal panel">
+            <div class="terminal-bar">
+              <span>bench://viewer</span>
+              <span id="best-board-model">{% if leaderboard %}{{ leaderboard[0].model }}{% else %}none yet{% endif %}</span>
+            </div>
+            <div class="viewer-label">
+              <span id="benchmark-view-label">submission</span>
+              <span id="benchmark-sim-status">idle</span>
+            </div>
+            <canvas id="benchmark-view-canvas" width="220" height="220"></canvas>
+            <div class="viewer-actions">
+              <button id="simulate-board-button" class="button accent">simulate</button>
+              <button id="benchmark-play-button" class="button secondary">play</button>
+              <button id="benchmark-pause-button" class="button secondary">pause</button>
+            </div>
+            <label class="slider-label viewer-slider">
+              <span>frame</span>
+              <input id="benchmark-frame-slider" type="range" min="0" max="0" value="0" />
+            </label>
+            <pre id="benchmark-log">Select a model and load its simulation.</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.CELL_AUTO_BENCHMARK_CONFIG = {
+        rows: {{ rows }},
+        cols: {{ cols }}
+      };
+    </script>
+    <script src="/static/benchmark.js"></script>
+  </body>
+</html>

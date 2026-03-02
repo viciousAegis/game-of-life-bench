@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game of Life Bench</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <aside class="sidebar panel">
+        <div class="brand">
+          <p class="eyebrow">simulator</p>
+          <h1>game-of-life bench</h1>
+          <p class="lede">edit a board, run a model, inspect Conway's Game of Life</p>
+        </div>
+
+        <div class="stack">
+          <div class="section-label">config</div>
+          <label>
+            Rule
+            <input id="rule-input" value="{{ default_rule }}" />
+          </label>
+          <label>
+            Max steps
+            <input id="steps-input" type="number" min="1" value="{{ default_max_steps }}" />
+          </label>
+          <label>
+            OpenRouter model id
+            <input id="model-input" value="{{ default_model }}" placeholder="provider/model-name" />
+          </label>
+        </div>
+
+        <div class="stack">
+          <div class="section-label">actions</div>
+          <button id="clear-button" class="button secondary">clear</button>
+          <button id="random-button" class="button secondary">random fill</button>
+          <button id="manual-button" class="button">run manual board</button>
+          <button id="model-button" class="button accent">run openrouter model</button>
+        </div>
+
+        <div class="stack compact-text">
+          <div class="section-label">limits</div>
+          <p>grid: {{ rows }}x{{ cols }}</p>
+          <p>topology: toroidal</p>
+          <p>live-cell cap: {{ max_live_cells }}</p>
+        </div>
+      </aside>
+
+      <section class="mainstage">
+        <div class="terminal panel">
+          <div class="terminal-bar">
+            <span>board://editor</span>
+            <span id="live-count">0 live cells</span>
+          </div>
+          <div
+            id="board-editor"
+            class="board-editor"
+            data-rows="{{ rows }}"
+            data-cols="{{ cols }}"
+            data-max-live-cells="{{ max_live_cells }}"
+          ></div>
+        </div>
+
+        <div class="terminal panel">
+          <div class="terminal-bar">
+            <span>sim://runtime</span>
+            <span id="run-status">idle</span>
+          </div>
+          <canvas id="simulation-canvas" width="360" height="360"></canvas>
+          <div class="transport">
+            <button id="play-button" class="button secondary">play</button>
+            <button id="pause-button" class="button secondary">pause</button>
+            <label class="slider-label">
+              <span>frame</span>
+              <input id="frame-slider" type="range" min="0" max="0" value="0" />
+            </label>
+          </div>
+        </div>
+
+        <div class="terminal panel metrics-panel">
+          <div class="terminal-bar">
+            <span>log://metrics</span>
+            <span>transient report</span>
+          </div>
+          <pre id="metrics-output">No run yet.</pre>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.CELL_AUTO_CONFIG = {
+        rows: {{ rows }},
+        cols: {{ cols }},
+        maxLiveCells: {{ max_live_cells }},
+        defaultModel: {{ default_model | tojson }}
+      };
+    </script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
