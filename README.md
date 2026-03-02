@@ -2,6 +2,8 @@
 
 `game-of-life-bench` is a Python benchmark runner for testing whether LLMs can design long-lived initial boards for Conway's Game of Life.
 
+[Link to Leaderboard](https://gameoflifebench.github.io)
+
 ## What It Measures
 
 - Grid: `8 x 8`
