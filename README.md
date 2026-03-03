@@ -126,14 +126,14 @@ Pages:
 How it works:
 
 - the browser talks to the local FastAPI app
-- model-backed runs go through the server, which calls OpenRouter using `OPENROUTER_API_KEY`
+- model-backed runs go through the server, which calls an OpenRouter-compatible `/chat/completions` endpoint
 - completed runs are written to `runs/`
 - benchmark batches are written to `benchmarks/`
 - the leaderboard page reads saved benchmark outputs rather than recomputing scores in the browser
 
 ## Configuration
 
-The benchmark runner uses `OPENROUTER_API_KEY` for model-backed runs.
+The benchmark runner uses `OPENROUTER_API_KEY` for model-backed runs against remote providers.
 
 Example:
 
@@ -141,3 +141,12 @@ Example:
 export OPENROUTER_API_KEY=...
 game-of-life-bench benchmark --models openai/gpt-5.2 --trials 10
 ```
+
+To point the app or benchmark runner at a different OpenRouter-compatible server such as vLLM, pass `--server-url` at runtime:
+
+```bash
+game-of-life-bench serve --server-url http://127.0.0.1:8000/v1
+game-of-life-bench benchmark --models meta-llama/llama-3.1-8b-instruct --server-url http://127.0.0.1:8000/v1
+```
+
+If `--server-url` points to `localhost`, `127.0.0.1`, or `::1`, `OPENROUTER_API_KEY` is optional and no `Authorization` header is sent unless you set one explicitly.

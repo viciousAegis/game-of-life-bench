@@ -2,8 +2,11 @@ import unittest
 from types import SimpleNamespace
 
 from game_of_life_bench.benchmark import BenchmarkRunner
+from game_of_life_bench.main import _apply_runtime_overrides
+from game_of_life_bench.main import settings as main_settings
+from game_of_life_bench.models.openrouter import OpenRouterClient
 from game_of_life_bench.models.openrouter import OpenRouterGenerationError
-from game_of_life_bench.models.openrouter import _build_prompt, _extract_choice_debug, _extract_json_blob, _extract_response_metadata
+from game_of_life_bench.models.openrouter import _build_prompt, _extract_choice_debug, _extract_json_blob, _extract_response_metadata, _is_local_server_url
 from game_of_life_bench.scoring import evaluate_board, validate_board
 from game_of_life_bench.leaderboard import build_leaderboard
 
@@ -174,6 +177,36 @@ class LifeEvaluationTests(unittest.TestCase):
         self.assertEqual(leaderboard[0]["submission_total_tokens"], 42)
         self.assertEqual(leaderboard[0]["total_cost"], 0.1)
         self.assertEqual(leaderboard[0]["avg_output_tokens"], 12.0)
+
+    def test_apply_runtime_overrides_updates_openrouter_base_url(self) -> None:
+        original_base_url = main_settings.openrouter_base_url
+        try:
+            override_url = "http://127.0.0.1:8001/v1"
+            _apply_runtime_overrides(openrouter_base_url=override_url)
+            self.assertEqual(main_settings.openrouter_base_url, override_url)
+        finally:
+            main_settings.openrouter_base_url = original_base_url
+
+    def test_local_server_url_detection_accepts_loopback_hosts(self) -> None:
+        self.assertTrue(_is_local_server_url("http://127.0.0.1:8000/v1"))
+        self.assertTrue(_is_local_server_url("http://localhost:8000/v1"))
+        self.assertFalse(_is_local_server_url("https://openrouter.ai/api/v1"))
+
+    def test_openrouter_client_allows_missing_api_key_for_local_server(self) -> None:
+        local_settings = SimpleNamespace(
+            openrouter_api_key=None,
+            openrouter_base_url="http://127.0.0.1:8000/v1",
+        )
+        client = OpenRouterClient(local_settings)
+        self.assertEqual(client._settings.openrouter_base_url, "http://127.0.0.1:8000/v1")
+
+    def test_openrouter_client_requires_api_key_for_non_local_server(self) -> None:
+        remote_settings = SimpleNamespace(
+            openrouter_api_key=None,
+            openrouter_base_url="https://openrouter.ai/api/v1",
+        )
+        with self.assertRaises(ValueError):
+            OpenRouterClient(remote_settings)
 
 
 class BenchmarkRunnerFailureTests(unittest.IsolatedAsyncioTestCase):

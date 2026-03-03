@@ -17,6 +17,12 @@ def main() -> None:
     serve_parser = subparsers.add_parser("serve")
     serve_parser.add_argument("--host", default=settings.app_host)
     serve_parser.add_argument("--port", type=int, default=settings.app_port)
+    serve_parser.add_argument(
+        "--server-url",
+        dest="openrouter_base_url",
+        default=None,
+        help="Override the OpenRouter-compatible API base URL for this process.",
+    )
 
     benchmark_parser = subparsers.add_parser("benchmark")
     benchmark_parser.add_argument("--models", nargs="+", required=True)
@@ -26,6 +32,12 @@ def main() -> None:
     benchmark_parser.add_argument("--max-steps", type=int, default=settings.max_steps)
     benchmark_parser.add_argument("--max-live-fraction", type=float, default=settings.max_live_fraction)
     benchmark_parser.add_argument("--concurrency", type=int, default=settings.benchmark_concurrency)
+    benchmark_parser.add_argument(
+        "--server-url",
+        dest="openrouter_base_url",
+        default=None,
+        help="Override the OpenRouter-compatible API base URL for this process.",
+    )
 
     leaderboard_parser = subparsers.add_parser("leaderboard")
     leaderboard_parser.add_argument("--json", action="store_true")
@@ -33,10 +45,12 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command in (None, "serve"):
+        _apply_runtime_overrides(openrouter_base_url=getattr(args, "openrouter_base_url", None))
         _serve(getattr(args, "host", settings.app_host), getattr(args, "port", settings.app_port))
         return
 
     if args.command == "benchmark":
+        _apply_runtime_overrides(openrouter_base_url=args.openrouter_base_url)
         asyncio.run(
             _run_benchmark(
                 models=args.models,
@@ -53,6 +67,11 @@ def main() -> None:
     if args.command == "leaderboard":
         _print_leaderboard(as_json=args.json, out_path=args.out)
         return
+
+
+def _apply_runtime_overrides(*, openrouter_base_url: str | None) -> None:
+    if openrouter_base_url:
+        settings.openrouter_base_url = openrouter_base_url
 
 
 def _serve(host: str, port: int) -> None:

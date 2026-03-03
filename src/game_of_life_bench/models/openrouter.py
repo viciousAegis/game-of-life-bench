@@ -2,6 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -49,7 +50,7 @@ class OpenRouterGenerationError(Exception):
 class OpenRouterClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        if not settings.openrouter_api_key:
+        if not settings.openrouter_api_key and not _is_local_server_url(settings.openrouter_base_url):
             raise ValueError("OPENROUTER_API_KEY is not configured.")
 
     async def generate_board(
@@ -71,9 +72,10 @@ class OpenRouterClient:
             seed=seed,
         )
         headers = {
-            "Authorization": f"Bearer {self._settings.openrouter_api_key}",
             "Content-Type": "application/json",
         }
+        if self._settings.openrouter_api_key:
+            headers["Authorization"] = f"Bearer {self._settings.openrouter_api_key}"
         if self._settings.openrouter_site_url:
             headers["HTTP-Referer"] = self._settings.openrouter_site_url
         if self._settings.openrouter_site_name:
@@ -224,6 +226,11 @@ def _build_payload(model: str, prompt: str, rows: int, cols: int, use_schema: bo
             },
         }
     return payload
+
+
+def _is_local_server_url(base_url: str) -> bool:
+    hostname = urlparse(base_url).hostname
+    return hostname in {"localhost", "127.0.0.1", "::1"}
 
 
 def _message_to_text(message: Any) -> str:
