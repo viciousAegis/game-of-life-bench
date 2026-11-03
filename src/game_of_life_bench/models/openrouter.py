@@ -28,6 +28,8 @@ class OpenRouterGenerationError(Exception):
         raw_response: str | None = None,
         status_code: int | None = None,
         provider_error: str | None = None,
+        response_metadata: dict[str, Any] | None = None,
+        response_payload: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.model = model
@@ -35,6 +37,8 @@ class OpenRouterGenerationError(Exception):
         self.raw_response = raw_response
         self.status_code = status_code
         self.provider_error = provider_error
+        self.response_metadata = response_metadata or {}
+        self.response_payload = response_payload
 
     def to_detail(self) -> dict[str, Any]:
         return {
@@ -44,6 +48,7 @@ class OpenRouterGenerationError(Exception):
             "provider_error": self.provider_error,
             "raw_response": self.raw_response,
             "prompt": self.prompt,
+            "response_metadata": self.response_metadata,
         }
 
 
@@ -95,27 +100,58 @@ class OpenRouterClient:
                     cols=cols,
                 )
             except httpx.HTTPError as exc:
+                response = getattr(exc, "response", None)
                 raise OpenRouterGenerationError(
                     "OpenRouter request failed.",
                     model=model,
                     prompt=prompt,
-                    status_code=getattr(exc.response, "status_code", None),
+                    status_code=getattr(response, "status_code", None),
                     provider_error=_extract_http_error_text(exc),
                 ) from exc
 
-        choice = data["choices"][0]
-        message = choice["message"]["content"]
-        raw_response = _message_to_text(message)
         response_metadata = _extract_response_metadata(data)
+        try:
+            choice = data["choices"][0]
+            message_payload = choice["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise OpenRouterGenerationError(
+                "OpenRouter response did not contain a model message.",
+                model=model,
+                prompt=prompt,
+                raw_response=json.dumps(data, indent=2, default=str),
+                response_metadata=response_metadata,
+                response_payload=data,
+            ) from exc
+        message = (
+            message_payload.get("content", "")
+            if isinstance(message_payload, dict)
+            else message_payload
+        )
+        raw_response = _message_to_text(message)
         try:
             board = _extract_board(raw_response)
         except ValueError as exc:
+            reasoning_text = _extract_reasoning_text(choice.get("message"))
+            recovered_board = _extract_board_from_reasoning(reasoning_text, rows, cols)
+            if recovered_board is not None:
+                board = recovered_board
+                raw_response = json.dumps({"board": board})
+                response_metadata["board_recovered_from"] = "reasoning"
+                return ModelRunResult(
+                    model=model,
+                    prompt=prompt,
+                    raw_response=raw_response,
+                    board=board,
+                    response_metadata=response_metadata,
+                )
             choice_debug = _extract_choice_debug(data)
             raise OpenRouterGenerationError(
                 f"Model response could not be parsed into a board: {exc}",
                 model=model,
                 prompt=prompt,
                 raw_response=raw_response or choice_debug,
+                response_metadata=response_metadata,
+                response_payload=data,
             ) from exc
         return ModelRunResult(
             model=model,
@@ -249,6 +285,8 @@ def _message_to_text(message: Any) -> str:
 
 def _extract_board(text: str) -> list[list[int]]:
     parsed = json.loads(_extract_json_blob(text))
+    if not isinstance(parsed, dict) or "board" not in parsed:
+        raise ValueError("Model response is missing a 'board' field.")
     board = parsed["board"]
     if not isinstance(board, list):
         raise ValueError("Model response is missing a valid 'board' array.")
@@ -270,6 +308,43 @@ def _extract_json_blob(text: str) -> str:
         return stripped[start : end + 1]
 
     raise ValueError("Model response did not contain a JSON object.")
+
+
+def _extract_board_from_reasoning(
+    reasoning: str | None,
+    rows: int,
+    cols: int,
+) -> list[list[int]] | None:
+    """Recover the last exact-size binary grid from a reasoning-only response."""
+    if not reasoning:
+        return None
+
+    decoder = json.JSONDecoder()
+    candidates: list[list[list[int]]] = []
+    for index, character in enumerate(reasoning):
+        if character not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(reasoning[index:])
+        except json.JSONDecodeError:
+            continue
+        board = value.get("board") if isinstance(value, dict) else value
+        if _is_exact_binary_board(board, rows, cols):
+            candidates.append(board)
+    return candidates[-1] if candidates else None
+
+
+def _is_exact_binary_board(value: Any, rows: int, cols: int) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == rows
+        and all(
+            isinstance(row, list)
+            and len(row) == cols
+            and all(type(cell) is int and cell in (0, 1) for cell in row)
+            for row in value
+        )
+    )
 
 
 def _extract_http_error_text(exc: httpx.HTTPError) -> str | None:

@@ -139,7 +139,25 @@ async def evaluate_openrouter(request: ModelRunRequest) -> dict:
             max_live_fraction=request.max_live_fraction,
         )
     except OpenRouterGenerationError as exc:
-        raise HTTPException(status_code=502, detail=exc.to_detail()) from exc
+        detail = exc.to_detail()
+        run_id = storage.save_run(
+            {
+                "source": "openrouter",
+                "status": "failed",
+                "request": request.model_dump(),
+                "model_run": {
+                    "model": exc.model,
+                    "prompt": exc.prompt,
+                    "raw_response": exc.raw_response,
+                    "board": None,
+                    "response_metadata": exc.response_metadata,
+                    "provider_response": exc.response_payload,
+                },
+                "evaluation": None,
+                "error": {"type": type(exc).__name__, **detail},
+            }
+        )
+        raise HTTPException(status_code=502, detail={**detail, "run_id": run_id}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPError as exc:

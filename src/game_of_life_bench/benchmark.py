@@ -6,7 +6,7 @@ from statistics import mean
 from typing import Any, Callable
 
 from .config import Settings
-from .models.openrouter import OpenRouterClient
+from .models.openrouter import ModelRunResult, OpenRouterClient, OpenRouterGenerationError
 from .scoring import EvaluationResult, evaluate_board
 
 
@@ -207,25 +207,43 @@ class BenchmarkRunner:
     ) -> BenchmarkTrialResult:
         async with self._semaphore:
             self._emit(f"  seed {seed + 1}/{trials_per_model}: requesting board")
-            model_run = await client.generate_board(
-                model=model,
-                rows=self._settings.grid_rows,
-                cols=self._settings.grid_cols,
-                max_live_cells=max_live_cells,
-                rule=rule,
-                topology=topology,
-                seed=seed,
-            )
-            self._emit(f"  seed {seed + 1}/{trials_per_model}: evaluating board")
-            evaluation = evaluate_board(
-                board=model_run.board,
-                rows=self._settings.grid_rows,
-                cols=self._settings.grid_cols,
-                rule=rule,
-                topology=topology,
-                max_steps=max_steps,
-                max_live_fraction=max_live_fraction,
-            )
+            model_run: ModelRunResult | None = None
+            try:
+                model_run = await client.generate_board(
+                    model=model,
+                    rows=self._settings.grid_rows,
+                    cols=self._settings.grid_cols,
+                    max_live_cells=max_live_cells,
+                    rule=rule,
+                    topology=topology,
+                    seed=seed,
+                )
+                self._emit(f"  seed {seed + 1}/{trials_per_model}: evaluating board")
+                evaluation = evaluate_board(
+                    board=model_run.board,
+                    rows=self._settings.grid_rows,
+                    cols=self._settings.grid_cols,
+                    rule=rule,
+                    topology=topology,
+                    max_steps=max_steps,
+                    max_live_fraction=max_live_fraction,
+                )
+            except Exception as exc:
+                failed_run_id = self._save_failed_trial(
+                    exc=exc,
+                    model=model,
+                    model_run=model_run,
+                    seed=seed,
+                    rule=rule,
+                    topology=topology,
+                    max_steps=max_steps,
+                    max_live_fraction=max_live_fraction,
+                )
+                self._emit(
+                    f"  seed {seed + 1}/{trials_per_model}: failed response saved "
+                    f"run_id={failed_run_id}"
+                )
+                raise
             run_payload = {
                 "source": "benchmark",
                 "request": {
@@ -257,6 +275,63 @@ class BenchmarkRunner:
                 model_run.response_metadata,
                 run_id,
             )
+
+    def _save_failed_trial(
+        self,
+        *,
+        exc: Exception,
+        model: str,
+        model_run: ModelRunResult | None,
+        seed: int,
+        rule: str,
+        topology: str,
+        max_steps: int,
+        max_live_fraction: float,
+    ) -> str:
+        if isinstance(exc, OpenRouterGenerationError):
+            error = {"type": type(exc).__name__, **exc.to_detail()}
+            failed_model_run = {
+                "model": exc.model,
+                "prompt": exc.prompt,
+                "raw_response": exc.raw_response,
+                "board": None,
+                "response_metadata": exc.response_metadata,
+                "provider_response": exc.response_payload,
+                "seed": seed,
+            }
+        else:
+            error = {"type": type(exc).__name__, "message": str(exc)}
+            failed_model_run = (
+                {
+                    "model": model_run.model,
+                    "prompt": model_run.prompt,
+                    "raw_response": model_run.raw_response,
+                    "board": model_run.board,
+                    "response_metadata": model_run.response_metadata,
+                    "provider_response": None,
+                    "seed": seed,
+                }
+                if model_run is not None
+                else None
+            )
+
+        return self._storage.save_run(
+            {
+                "source": "benchmark",
+                "status": "failed",
+                "request": {
+                    "model": model,
+                    "rule": rule,
+                    "topology": topology,
+                    "max_steps": max_steps,
+                    "max_live_fraction": max_live_fraction,
+                    "seed": seed,
+                },
+                "model_run": failed_model_run,
+                "evaluation": None,
+                "error": error,
+            }
+        )
 
     def _emit(self, message: str) -> None:
         if self._progress_callback is not None:

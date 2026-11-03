@@ -6,7 +6,14 @@ from game_of_life_bench.main import _apply_runtime_overrides
 from game_of_life_bench.main import settings as main_settings
 from game_of_life_bench.models.openrouter import OpenRouterClient
 from game_of_life_bench.models.openrouter import OpenRouterGenerationError
-from game_of_life_bench.models.openrouter import _build_prompt, _extract_choice_debug, _extract_json_blob, _extract_response_metadata, _is_local_server_url
+from game_of_life_bench.models.openrouter import (
+    _build_prompt,
+    _extract_board_from_reasoning,
+    _extract_choice_debug,
+    _extract_json_blob,
+    _extract_response_metadata,
+    _is_local_server_url,
+)
 from game_of_life_bench.scoring import evaluate_board, validate_board
 from game_of_life_bench.leaderboard import build_leaderboard
 
@@ -71,9 +78,11 @@ class LifeEvaluationTests(unittest.TestCase):
             raw_response="not json",
             status_code=400,
             provider_error="bad request",
+            response_metadata={"id": "generation-123"},
         )
         self.assertEqual(error.to_detail()["model"], "test/model")
         self.assertEqual(error.to_detail()["raw_response"], "not json")
+        self.assertEqual(error.to_detail()["response_metadata"]["id"], "generation-123")
 
     def test_prompt_contains_example_board(self) -> None:
         prompt = _build_prompt(rows=4, cols=4, max_live_cells=8, rule="B3/S23", topology="toroidal")
@@ -92,6 +101,18 @@ class LifeEvaluationTests(unittest.TestCase):
         debug = _extract_choice_debug(payload)
         self.assertIn('"finish_reason": "stop"', debug)
         self.assertIn('"reasoning": "hidden"', debug)
+
+    def test_recover_last_exact_binary_board_from_reasoning(self) -> None:
+        reasoning = (
+            'An intermediate board was [[1, 1], [1, 1]]. '
+            'Final answer: {"board": [[0, 1], [1, 0]]}'
+        )
+        board = _extract_board_from_reasoning(reasoning, rows=2, cols=2)
+        self.assertEqual(board, [[0, 1], [1, 0]])
+
+    def test_reasoning_recovery_rejects_wrong_shape(self) -> None:
+        board = _extract_board_from_reasoning("[[0, 1, 0]]", rows=2, cols=2)
+        self.assertIsNone(board)
 
     def test_extract_response_metadata_captures_reasoning_and_usage(self) -> None:
         payload = {
@@ -210,6 +231,85 @@ class LifeEvaluationTests(unittest.TestCase):
 
 
 class BenchmarkRunnerFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_client_scores_board_recovered_from_reasoning(self) -> None:
+        settings = SimpleNamespace(
+            openrouter_api_key=None,
+            openrouter_base_url="http://127.0.0.1:8000/v1",
+            openrouter_timeout_seconds=1.0,
+            openrouter_site_url=None,
+            openrouter_site_name="test",
+        )
+        client = OpenRouterClient(settings)
+
+        async def fake_request_board(**kwargs):
+            return {
+                "id": "generation-123",
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {
+                            "content": "",
+                            "reasoning": 'Final board: {"board": [[0, 1], [1, 0]]}',
+                        },
+                    }
+                ],
+            }
+
+        client._request_board = fake_request_board  # type: ignore[method-assign]
+        result = await client.generate_board(
+            model="demo/model",
+            rows=2,
+            cols=2,
+            max_live_cells=2,
+            rule="B3/S23",
+            topology="toroidal",
+            seed=0,
+        )
+
+        self.assertEqual(result.board, [[0, 1], [1, 0]])
+        self.assertEqual(result.response_metadata["board_recovered_from"], "reasoning")
+
+    async def test_failed_trial_persists_provider_output_before_reraising(self) -> None:
+        settings = SimpleNamespace(grid_rows=2, grid_cols=2, benchmark_concurrency=1)
+        saved_payloads = []
+        storage = SimpleNamespace(
+            save_run=lambda payload: saved_payloads.append(payload) or "failed-run-id"
+        )
+        runner = BenchmarkRunner(settings, storage)
+
+        class FailingClient:
+            async def generate_board(self, **kwargs):
+                raise OpenRouterGenerationError(
+                    "output was reasoning-only",
+                    model=kwargs["model"],
+                    prompt="full prompt",
+                    raw_response='{"finish_reason":"length","message":{"reasoning":"work"}}',
+                    response_metadata={"id": "generation-123", "finish_reason": "length"},
+                    response_payload={"choices": [{"message": {"reasoning": "work"}}]},
+                )
+
+        with self.assertRaises(OpenRouterGenerationError):
+            await runner._run_trial(
+                client=FailingClient(),
+                model="demo/model",
+                seed=0,
+                trials_per_model=1,
+                max_live_cells=2,
+                rule="B3/S23",
+                topology="toroidal",
+                max_steps=10,
+                max_live_fraction=0.5,
+            )
+
+        self.assertEqual(len(saved_payloads), 1)
+        payload = saved_payloads[0]
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["model_run"]["prompt"], "full prompt")
+        self.assertIn("reasoning", payload["model_run"]["raw_response"])
+        self.assertEqual(payload["model_run"]["response_metadata"]["id"], "generation-123")
+        provider_response = payload["model_run"]["provider_response"]
+        self.assertEqual(provider_response["choices"][0]["message"]["reasoning"], "work")
+
     async def test_partial_trial_failures_do_not_fail_model(self) -> None:
         settings = SimpleNamespace(
             grid_rows=2,
